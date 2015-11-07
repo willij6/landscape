@@ -3,5 +3,15 @@ CC = gcc
 LIBS = -lGL -lGLU -lglut -lm
 SRC = main.c
 
-default: $(SRC)
+view: heights.txt drainage.txt program
+	./program
+
+
+heights.txt: height_gen.py
+	./height_gen.py
+
+drainage.txt: height_gen.py
+	./height_gen.py
+
+program: $(SRC)
 	$(CC) $(SRC) $(LIBS) -o program
