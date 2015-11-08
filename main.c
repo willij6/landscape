@@ -11,7 +11,7 @@ int tracking = 0;
 
 #define N 129
 
-int heights[N][N];
+float heights[N][N];
 float drainage_totals[N][N];
 int max_height;
 
@@ -67,7 +67,7 @@ void levelOut() {
 void set_max_height()
 {
   int i, j;
-  max_height = 0;
+  max_height = 0.0;
   for(i = 0; i < N; i++) {
     for(j = 0; j < N; j++) {
       if(heights[i][j] > max_height)
@@ -76,7 +76,7 @@ void set_max_height()
   }
 }
 
-int outside_lands(int i, int j)
+float outside_lands(int i, int j)
 {
   if(i < 0 || i >= N || j < 0 || j >= N) {
     return 0;
@@ -86,8 +86,9 @@ int outside_lands(int i, int j)
 
 void mollify()
 {
-  int alts[N][N];
-  int i,j, ii, jj, t;
+  float alts[N][N];
+  int i,j, ii, jj;
+  float t;
   for(i = 0; i < N; i++) {
     for(j = 0; j < N; j++) {
       t = 0;
@@ -96,7 +97,7 @@ void mollify()
 	  t += outside_lands(i+ii,j+jj);
 	}
       }
-      /* t /= 25; */
+      t /= 9;
       alts[i][j] = t;
     }
   }
@@ -111,11 +112,12 @@ void mollify()
 void set_heights(char *fname)
 {
   FILE *pFile;
-  int i, j, t;
+  int i, j;
+  float t;
   pFile = fopen(fname,"r");
   for(i = 0; i < N; i++) {
     for(j = 0; j < N; j++) {
-      fscanf(pFile, "%d", &t);
+      fscanf(pFile, "%f", &t);
       heights[i][j] = t;
       /* printf("I just read %d\n",t); */
     }
@@ -136,7 +138,7 @@ void whatever(int i, int j)
   GLfloat color[3];
   verts[0] = 2.0*i/N-1;
   verts[1] = 2.0*j/N-1;
-  verts[2] = 1.0*heights[i][j]/max_height/1.5-0.5;
+  verts[2] = heights[i][j]/max_height/1.5-0.5;
   color[1] = 1.0-drainage_totals[i][j];
   color[2] = drainage_totals[i][j];
   color[0] = 0;
@@ -438,7 +440,7 @@ void load_drainage_hack()
   
   for(i = 0; i < N; i++) {
     for(j = 0; j < N; j++) {
-      drainage_totals[i][j] = heights[i][j]*1.0/max_height;
+      drainage_totals[i][j] = heights[i][j]/max_height;
       /* drainage_totals[i][j] = sqrt(drainage_totals[i][j]); */
     }
   }
