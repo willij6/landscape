@@ -7,10 +7,10 @@ view: heights.txt drainage.txt program
 	./program
 
 
-heights.txt: height_gen.py
+heights.txt: height_gen.py slopes
 	./height_gen.py
 
-drainage.txt: height_gen.py
+drainage.txt: height_gen.py slopes
 	./height_gen.py
 
 program: $(SRC)

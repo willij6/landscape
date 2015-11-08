@@ -12,6 +12,20 @@ classic = False
 
 open_locs = set()
 
+
+# load the slope bounds into memory
+slope_file = open('slopes','r')
+lower_slopes = [] # if these are positive, problems can arise
+upper_slopes = []
+for line in slope_file:
+    line = line[:-1] # lose trailing newline
+    (lower,upper) = line.split(' ')
+    lower_slopes.append(int(lower))
+    upper_slopes.append(int(upper))
+slope_file.close()
+n_slopes = len(lower_slopes)
+max_slope = max(upper_slopes)
+
 # i = n*3//4*2+1
 # j = n//2*2+1
 # starti = i
@@ -205,56 +219,26 @@ while not update_list.empty():
         nbhr = (loc[0]+dx,loc[1]+dy)
         if(nbhr[0] < 0 or nbhr[0] > 2*n or nbhr[1] < 0 or nbhr[1] > 2*n):
             continue
-        # check for downhill
-        if(loc in open_locs and parents[loc] == nbhr):
-            flag(nbhr,heights[loc])
-        elif(loc not in open_locs and nbhr in open_locs):
-            flag(nbhr,heights[loc])
-        elif(nbhr in open_locs and parents[nbhr] == loc):
-            if(classic):
-                flag(nbhr,heights[loc]+1)
-            else:
-                if(drainage_total[loc] > n*n/10):
-                    slope = 1
-                else:
-                    slope = 10
-                flag(nbhr,heights[loc]+slope)
+
+        
+
+        if(loc not in open_locs and nbhr not in open_locs):
+            flag(nbhr,heights[loc]+max_slope)
         else:
-            if(classic):
-                flag(nbhr,heights[loc]+1)
+            # downstream neighbor
+            if(loc in open_locs and parents[loc] == nbhr
+               or loc not in open_locs):
+                capacity = drainage_total[nbhr]
+                capacity = math.log(capacity+1)/math.log((2*n+1)**2+2)
+                capacity = int(capacity*n_slopes)
+                flag(nbhr, heights[loc] - lower_slopes[capacity])
             else:
-                flag(nbhr,heights[loc]+100)
+                #upstream nbhr
+                capacity = drainage_total[loc]
+                capacity = math.log(capacity+1)/math.log((2*n+1)**2+2)
+                capacity = int(capacity*n_slopes)
+                flag(nbhr, heights[loc] + upper_slopes[capacity])
 
-                
-# heights = {}
-# current = set(perimeter)
-# next_step = set()
-
-# for step in range(5*n**2):
-#     while(len(current) > 0):
-#         c = current.pop()
-#         heights[c] = step
-#         for choice in range(4):
-#             (dx,dy) = [[1,0],[0,1],[-1,0],[0,-1]][choice]
-#             nbhr = (c[0]+dx,c[1]+dy)
-#             if(nbhr[0] < 0 or nbhr[0] > 2*n):
-#                 continue
-#             if(nbhr[1] < 0 or nbhr[1] > 2*n):
-#                 continue
-#             if(nbhr in heights or nbhr in current):
-#                 continue
-#             if(c in open_locs and parents[c] == nbhr):
-#                 if(nbhr in next_step):
-#                     next_step.remove(nbhr)
-#                 current.add(nbhr)
-#             elif(c not in open_locs and nbhr in open_locs):
-#                 if(nbhr in next_step):
-#                     next_step.remove(nbhr)
-#                 current.add(nbhr)
-#             else:
-#                 next_step.add(nbhr)
-#     current = next_step
-#     next_step = set()
 
 
         
@@ -293,8 +277,10 @@ if(verbose):
     disp_parents()            
     disp_heights()
 
-
-ht = open('heights.txt','w')
+if(classic):
+    ht = open('classic.txt','w')
+else:
+    ht = open('heights.txt','w')
 for i in range(2*n+1):
     for j in range(2*n+1):
         data = heights[(i,j)]
