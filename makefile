@@ -1,11 +1,12 @@
 # Huh, let's try and write a makefile
 CC = gcc
 LIBS = -lGL -lGLU -lglut -lm
-SRC = main.c
+SRC = viewer.c
 
-view: heights.txt drainage.txt program
+view: data program
 	./program
 
+data: heights.txt drainage.txt
 
 heights.txt: height_gen.py slopes
 	./height_gen.py
