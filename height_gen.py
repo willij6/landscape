@@ -1,4 +1,51 @@
 #!/usr/bin/python3
+
+# This program generates the elevation data
+# which is fed into the viewing program.
+
+# The following algorithm is used:
+# First, a maze is randomly generated.
+# The walls of the maze become the rivers, and
+# the open passages of the maze become the divides.
+# Now, try to assign a height to each point in the maze,
+# subject to the constraints that
+# 1. Rivers flow downhill
+# 2. Slope never exceeds some constant, say, 1.0
+# 3. The perimeter of the map (where all the rivers empty) has height 0
+#
+# Among _all_ such ways of assigning heights, there is one that
+# simultaneously maximizes all the heights.  We take that joint maximum
+#
+# This is because all the constraints are of the form h_1 <= h_2 + c
+#
+# To actually find this maximum, we propagate constraints.
+# (Maybe this is called "relaxation"?)
+# We start out knowing that all the points on the perimeter are
+# at height at most 0.  If there's a constraint h_1 <= h_2 + c,
+# then the moment we learn that h_2 <= b_2, we also know h_1 <= b_2 + c.
+#
+# So each upper bound gives rise to upper bounds on the neighboring
+# height variables.  Our goal is to propagate these upper bounds until
+# everything has run out of steam.
+#
+# To do this, we maintain a table listing the best known upper bound for
+# each location on the map, and a priority queue of facts that need to
+# be processed.  Each fact is an upper bound on a specific location.
+#
+# To process a fact from the queue, we check whether it is already known
+# in the main table and if so, we do nothing.
+# Otherwise, we update the main table, and use the constraints between
+# adjacent cells to create four new facts, which we throw into the
+# priority queue.
+#
+# Assuming some positivity on the signs in the constraints, this is
+# secretly Dijsktra's algorithm, which motivates the use of a priority
+# queue.
+
+# In the event that the constraints are inconsistent, the algorithm
+# never terminates! TODO: fix this.
+
+
 import random
 import math
 from queue import PriorityQueue
