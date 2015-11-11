@@ -63,7 +63,7 @@ float outside_lands(int i, int j)
   return heights[i][j];
 }
 
-void mollify()
+void smooth()
 {
   float alts[N][N];
   int i,j, ii, jj;
@@ -110,7 +110,7 @@ void load_drainage_hack()
 {
   int i, j;
   set_heights("drainage.txt");
-  mollify();
+  smooth();
   
   for(i = 0; i < N; i++) {
     for(j = 0; j < N; j++) {
@@ -449,7 +449,7 @@ void mymove(int x, int y)
 void keyfunc(unsigned char key, int x, int y)
 {
   if(key == ' ') {
-      mollify();
+      smooth();
   }
   /* else if(key == '4') { */
   /*     levelOut(); */
