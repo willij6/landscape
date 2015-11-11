@@ -1,19 +1,226 @@
 #include <stdio.h>
-// #define GLUT_DISABLE_ATEXIT_HACK
-// #include <windows.h>
 #include <math.h>
 #include <GL/glut.h>
 #include <stdlib.h>
 
-int w, h, oldx, oldy;
-int tracking = 0;
+
+/*
+  viewer.c
+  Reads in some height data from heights.txt and renders it
+  using Ancient OpenGL and GLUT.  TODO: upgrade to Modern OpenGL
+
+  Colors are determined by data from drainage.txt: higher
+  numbers are blue, lesser numbers are green
+
+  The user can fly around the rendered landscape using some
+  mouse and keyboard controls
+*/
+
+// uh, broadly speaking, there should be these concerns:
+// * actually rendering and coloring the stuff
+// * random initialization
+// * resizing
+// * flying around and matrices and all that
+// * file IO
+
+
 
 
 #define N 129
 
 float heights[N][N];
 float drainage_totals[N][N];
-int max_height;
+
+
+ 
+
+void normalize_heights()
+{
+  int i, j;
+  float max_height = 0.0;
+  for(i = 0; i < N; i++) {
+    for(j = 0; j < N; j++) {
+      if(heights[i][j] > max_height)
+	max_height = heights[i][j];
+    }
+  }
+  if(max_height == 0.0)
+    max_height == 1.0;
+  for(i = 0; i < N; i++) {
+    for(j = 0; j < N; j++) {
+      heights[i][j] /= max_height;
+    }
+  }
+
+}
+ 
+
+float outside_lands(int i, int j)
+{
+  if(i < 0 || i >= N || j < 0 || j >= N) {
+    return 0;
+  }
+  return heights[i][j];
+}
+
+void mollify()
+{
+  float alts[N][N];
+  int i,j, ii, jj;
+  float t;
+  for(i = 0; i < N; i++) {
+    for(j = 0; j < N; j++) {
+      t = 0;
+      for(ii = -1; ii < 2; ii++) {
+	for(jj = -1; jj < 2; jj++) {
+	  t += outside_lands(i+ii,j+jj);
+	}
+      }
+      t /= 9;
+      alts[i][j] = t;
+    }
+  }
+  for(i = 0; i < N; i++) {
+    for(j = 0; j < N; j++) {
+      heights[i][j] = alts[i][j];
+    }
+  }
+  normalize_heights();
+}
+
+void set_heights(char *fname)
+{
+  FILE *pFile;
+  int i, j;
+  float t;
+  pFile = fopen(fname,"r");
+  for(i = 0; i < N; i++) {
+    for(j = 0; j < N; j++) {
+      fscanf(pFile, "%f", &t);
+      heights[i][j] = t;
+      /* printf("I just read %d\n",t); */
+    }
+  }
+  normalize_heights();
+  fclose(pFile);
+}
+
+
+void load_drainage_hack()
+{
+  int i, j;
+  set_heights("drainage.txt");
+  mollify();
+  
+  for(i = 0; i < N; i++) {
+    for(j = 0; j < N; j++) {
+      drainage_totals[i][j] = heights[i][j];
+      /* drainage_totals[i][j] = sqrt(drainage_totals[i][j]); */
+    }
+  }
+
+}
+
+
+
+void mytrivert(GLfloat* pt);
+void mycolor(GLfloat* col);
+
+void whatever(int i, int j)
+{
+  GLfloat verts[3];
+  GLfloat color[3];
+  verts[0] = 2.0*i/N-1;
+  verts[1] = 2.0*j/N-1;
+  verts[2] = heights[i][j]/1.5-0.5;
+  color[1] = 1.0-drainage_totals[i][j];
+  color[2] = drainage_totals[i][j];
+  color[0] = 0;
+  // TODO: this doesn't make sense
+  /* if(selecting) */
+  /*   glLoadName(i*N+j); */
+  mycolor(color);
+  mytrivert(verts);
+}
+
+void drawObjects()
+{
+  int i, j;
+  glBegin(GL_TRIANGLES);
+  for(j = 0; j < N-1; j++) {
+    for(i = 0; i < N-1; i++) {
+      whatever(i,j);
+      whatever(i+1,j);
+      whatever(i,j+1);
+      whatever(i+1,j+1);
+      whatever(i+1,j);
+      whatever(i,j+1);
+    }
+  }
+  glEnd();
+  glutSwapBuffers();
+}
+
+
+GLfloat dist(GLfloat* p1, GLfloat* p2)
+{
+  GLfloat dx, dy, dz;
+  dx = p1[0] - p2[0];
+  dy = p1[1] - p2[1];
+  dz = p1[2] - p2[2];
+  return sqrt(dx*dx + dy*dy + dz*dz);
+}
+
+GLfloat dot(GLfloat* p1, GLfloat* p2)
+{
+  return(p1[0]*p2[0] + p1[1]*p2[1] + p1[2]*p2[2]);
+}
+
+int max(int x, int y)
+{
+  if(x > y) 
+    return x;
+  return y;
+}
+ 
+
+void cross(GLfloat* a, GLfloat* b, GLfloat* c, GLfloat* d)
+{
+  GLfloat la;
+  //GLfloat sum[3];
+  int i;
+  d[0] = (b[1]-a[1])*(c[2]-a[2])-(b[2]-a[2])*(c[1]-a[1]);
+  d[1] = (b[2]-a[2])*(c[0]-a[0])-(b[0]-a[0])*(c[2]-a[2]);
+  d[2] = (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+  //for(i = 0; i < 3; i++) sum[i] = a[i]+b[i]+c[i];
+  la = dot(d,d);
+  la = sqrt(la);
+  // if(dot(d,sum) > 0) la = -la;
+  for(i = 0; i < 3; i++) d[i] /= la;
+  //printf("Sum was (%f,%f,%f)\n",sum[0],sum[1],sum[2]);
+  //printf("Normal was (%f,%f,%f)\n",d[0],d[1],d[2]);
+  
+}
+
+void mytrivert(GLfloat* pt) {
+  static GLfloat vertices[3][3];
+  static int stored = 0;
+  int i;
+  GLfloat normal[3];
+  for(i = 0; i < 3; i++)
+    vertices[stored][i] = pt[i];
+  stored++;
+  if(stored < 3)
+    return;
+  cross(vertices[0],vertices[1],vertices[2],normal);
+  glNormal3fv(normal);
+  for(i = 0; i < 3; i++)
+    glVertex3fv(vertices[i]);
+  stored = 0;
+}
+
+
+
 
 
 float viewbox = 1.42;
@@ -64,158 +271,9 @@ void levelOut() {
   varphi = 90;
 }
 
-void set_max_height()
-{
-  int i, j;
-  max_height = 0.0;
-  for(i = 0; i < N; i++) {
-    for(j = 0; j < N; j++) {
-      if(heights[i][j] > max_height)
-  max_height = heights[i][j];
-    }
-  }
-}
-
-float outside_lands(int i, int j)
-{
-  if(i < 0 || i >= N || j < 0 || j >= N) {
-    return 0;
-  }
-  return heights[i][j];
-}
-
-void mollify()
-{
-  float alts[N][N];
-  int i,j, ii, jj;
-  float t;
-  for(i = 0; i < N; i++) {
-    for(j = 0; j < N; j++) {
-      t = 0;
-      for(ii = -1; ii < 2; ii++) {
-	for(jj = -1; jj < 2; jj++) {
-	  t += outside_lands(i+ii,j+jj);
-	}
-      }
-      t /= 9;
-      alts[i][j] = t;
-    }
-  }
-  for(i = 0; i < N; i++) {
-    for(j = 0; j < N; j++) {
-      heights[i][j] = alts[i][j];
-    }
-  }
-  set_max_height();
-}
-
-void set_heights(char *fname)
-{
-  FILE *pFile;
-  int i, j;
-  float t;
-  pFile = fopen(fname,"r");
-  for(i = 0; i < N; i++) {
-    for(j = 0; j < N; j++) {
-      fscanf(pFile, "%f", &t);
-      heights[i][j] = t;
-      /* printf("I just read %d\n",t); */
-    }
-  }
-  mollify();
-  fclose(pFile);
-}
 
 
 
-
-void mytrivert(GLfloat* pt);
-void mycolor(GLfloat* col);
-
-void whatever(int i, int j)
-{
-  GLfloat verts[3];
-  GLfloat color[3];
-  verts[0] = 2.0*i/N-1;
-  verts[1] = 2.0*j/N-1;
-  verts[2] = heights[i][j]/max_height/1.5-0.5;
-  color[1] = 1.0-drainage_totals[i][j];
-  color[2] = drainage_totals[i][j];
-  color[0] = 0;
-  // TODO: this doesn't make sense
-  /* if(selecting) */
-  /*   glLoadName(i*N+j); */
-  mycolor(color);
-  mytrivert(verts);
-}
-
-void drawObjects()
-{
-  int i, j;
-  glBegin(GL_TRIANGLES);
-  for(j = 0; j < N-1; j++) {
-    for(i = 0; i < N-1; i++) {
-      whatever(i,j);
-      whatever(i+1,j);
-      whatever(i,j+1);
-      whatever(i+1,j+1);
-      whatever(i+1,j);
-      whatever(i,j+1);
-    }
-  }
-  glEnd();
-  glutSwapBuffers();
-}
-
-
-GLfloat dist(GLfloat* p1, GLfloat* p2)
-{
-  GLfloat dx, dy, dz;
-  dx = p1[0] - p2[0];
-  dy = p1[1] - p2[1];
-  dz = p1[2] - p2[2];
-  return sqrt(dx*dx + dy*dy + dz*dz);
-}
-
-GLfloat dot(GLfloat* p1, GLfloat* p2)
-{
-  return(p1[0]*p2[0] + p1[1]*p2[1] + p1[2]*p2[2]);
-}
-
-void cross(GLfloat* a, GLfloat* b, GLfloat* c, GLfloat* d)
-{
-  GLfloat la;
-  //GLfloat sum[3];
-  int i;
-  d[0] = (b[1]-a[1])*(c[2]-a[2])-(b[2]-a[2])*(c[1]-a[1]);
-  d[1] = (b[2]-a[2])*(c[0]-a[0])-(b[0]-a[0])*(c[2]-a[2]);
-  d[2] = (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
-  //for(i = 0; i < 3; i++) sum[i] = a[i]+b[i]+c[i];
-  la = dot(d,d);
-  la = sqrt(la);
-  // if(dot(d,sum) > 0) la = -la;
-  for(i = 0; i < 3; i++) d[i] /= la;
-  //printf("Sum was (%f,%f,%f)\n",sum[0],sum[1],sum[2]);
-  //printf("Normal was (%f,%f,%f)\n",d[0],d[1],d[2]);
-  
-}
-
-void mytrivert(GLfloat* pt) {
-  static GLfloat vertices[3][3];
-  static int stored = 0;
-  int i;
-  GLfloat normal[3];
-  for(i = 0; i < 3; i++)
-    vertices[stored][i] = pt[i];
-  stored++;
-  if(stored < 3)
-    return;
-  cross(vertices[0],vertices[1],vertices[2],normal);
-  glNormal3fv(normal);
-  for(i = 0; i < 3; i++)
-    glVertex3fv(vertices[i]);
-  stored = 0;
-}
 
 
 
@@ -297,15 +355,13 @@ void display()
 }
 
 
-int max(int x, int y)
-{
-  if(x > y) 
-    return x;
-  return y;
-}
+
+
+
 
 void myreshape(int width, int height)
 {
+  int w, h;
   w = width;
   h = height;
   glViewport(0,0,w,h);
@@ -325,6 +381,8 @@ void myreshape(int width, int height)
 
 
 
+int oldx, oldy;
+int tracking = 0;
 
  
  
@@ -432,20 +490,6 @@ void specialkeyfunc(int key, int x, int y)
 }
 
 
-void load_drainage_hack()
-{
-  int i, j;
-  set_heights("drainage.txt");
-  mollify();
-  
-  for(i = 0; i < N; i++) {
-    for(j = 0; j < N; j++) {
-      drainage_totals[i][j] = heights[i][j]/max_height;
-      /* drainage_totals[i][j] = sqrt(drainage_totals[i][j]); */
-    }
-  }
-
-}
 
 
 int main(int argc, char **argv)
