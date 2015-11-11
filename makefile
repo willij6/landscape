@@ -3,8 +3,8 @@ CC = gcc
 LIBS = -lGL -lGLU -lglut -lm
 SRC = viewer.c
 
-view: data program
-	./program
+view: data viewer
+	./viewer
 
 data: heights.txt drainage.txt
 
@@ -14,5 +14,5 @@ heights.txt: height_gen.py slopes
 drainage.txt: height_gen.py slopes
 	./height_gen.py
 
-program: $(SRC)
-	$(CC) $(SRC) $(LIBS) -o program
+viewer: $(SRC)
+	$(CC) $(SRC) $(LIBS) -o viewer
