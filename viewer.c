@@ -123,45 +123,6 @@ void load_drainage_hack()
 
 
 
-void mytrivert(GLfloat* pt);
-void mycolor(GLfloat* col);
-
-void whatever(int i, int j)
-{
-  GLfloat verts[3];
-  GLfloat color[3];
-  verts[0] = 2.0*i/N-1;
-  verts[1] = 2.0*j/N-1;
-  verts[2] = heights[i][j]/1.5-0.5;
-  color[1] = 1.0-drainage_totals[i][j];
-  color[2] = drainage_totals[i][j];
-  color[0] = 0;
-  // TODO: this doesn't make sense
-  /* if(selecting) */
-  /*   glLoadName(i*N+j); */
-  mycolor(color);
-  mytrivert(verts);
-}
-
-void drawObjects()
-{
-  int i, j;
-  glBegin(GL_TRIANGLES);
-  for(j = 0; j < N-1; j++) {
-    for(i = 0; i < N-1; i++) {
-      whatever(i,j);
-      whatever(i+1,j);
-      whatever(i,j+1);
-      whatever(i+1,j+1);
-      whatever(i+1,j);
-      whatever(i,j+1);
-    }
-  }
-  glEnd();
-  glutSwapBuffers();
-}
-
-
 GLfloat dist(GLfloat* p1, GLfloat* p2)
 {
   GLfloat dx, dy, dz;
@@ -202,7 +163,8 @@ void cross(GLfloat* a, GLfloat* b, GLfloat* c, GLfloat* d)
   
 }
 
-void mytrivert(GLfloat* pt) {
+
+void triangleVertex(GLfloat* pt) {
   static GLfloat vertices[3][3];
   static int stored = 0;
   int i;
@@ -218,6 +180,69 @@ void mytrivert(GLfloat* pt) {
     glVertex3fv(vertices[i]);
   stored = 0;
 }
+
+void mycolor(GLfloat* arg) {
+  GLfloat color[4];
+  int i;
+  for(i = 0; i < 3; i++)
+    color[i] = arg[i];
+  color[3] = 1.0;
+  glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, color);
+  glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, color);
+}
+
+
+
+void process_point(int i, int j)
+{
+  GLfloat verts[3];
+  GLfloat color[3];
+  verts[0] = 2.0*i/N-1;
+  verts[1] = 2.0*j/N-1;
+  verts[2] = heights[i][j]/1.5-0.5;
+  color[1] = 1.0-drainage_totals[i][j];
+  color[2] = drainage_totals[i][j];
+  color[0] = 0;
+  mycolor(color);
+  triangleVertex(verts);
+}
+
+
+
+void drawObjects()
+{
+  int i, j;
+  glBegin(GL_TRIANGLES);
+  for(j = 0; j < N-1; j++) {
+    for(i = 0; i < N-1; i++) {
+      process_point(i,j);
+      process_point(i+1,j);
+      process_point(i,j+1);
+      process_point(i+1,j+1);
+      process_point(i+1,j);
+      process_point(i,j+1);
+    }
+  }
+  glEnd();
+  glutSwapBuffers();
+}
+
+
+
+
+void display()
+{
+
+  int i, j,k, ell, jay;
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+  drawObjects();
+  glutSwapBuffers();
+}
+
+
+
+
 
 
 
@@ -277,83 +302,7 @@ void levelOut() {
 
 
 
-void myinit()
-{
-  GLfloat mat_specular[] = {0.0, 0.0, 0.0,1.0};
-  GLfloat mat_diffuse[] = {0.0,0.0, 0.0, 1.0}; // though, this'll be changed later
-  GLfloat mat_ambient[] = {0.0, 0.0, 0.0, 1.0};
-  GLfloat mat_shininess= 100.0; // wait, this doesn't matter
-
-  /* glLightfv(GL_LIGHT0, GL_AMBIENT, light_ambient); */
-  /* glLightfv(GL_LIGHT0, GL_DIFFUSE, light_diffuse); */
-  /* glLightfv(GL_LIGHT0, GL_SPECULAR, light_specular); */
-  // default position is vertical, which is okay, for now
-  // default ambient is black
-  // default diffuse and specular are white
-  // good enough
-  GLfloat all_ones[] = {1, 1, 1, 1};
-  GLfloat halves[] = {0.5, 0.5, 0.5,1};
-
-    
-  /* glLightfv(GL_LIGHT0,GL_DIFFUSE,mat_specular); */
-  glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, mat_specular);
-  glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, mat_ambient);
-  glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, mat_diffuse);
-  glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, mat_shininess);
-
-
-  GLfloat light_pos[] = {0.0,0.0,1.0,0.0};
-  /* glLightfv(GL_LIGHT1, GL_POSITION, light_pos); */
-  glLightfv(GL_LIGHT0, GL_DIFFUSE, halves);
-  glLightfv(GL_LIGHT0, GL_SPECULAR, halves);
-  glLightfv(GL_LIGHT1, GL_DIFFUSE, halves);
-  
-  glShadeModel(GL_SMOOTH);
-  glEnable(GL_LIGHTING);
-  glEnable(GL_LIGHT0);
-  glEnable(GL_LIGHT1);
-  
-  glLightModeli(GL_LIGHT_MODEL_TWO_SIDE, GL_TRUE);
-
-  
-  glClearColor(1.0, 1.0, 1.0, 0.0);
-  glColor3f(1.0,0.0,0.0);
-  
-  
-  glMatrixMode(GL_PROJECTION);
-  glLoadIdentity();
-  float w = viewbox;
-  glOrtho(-w,w,-w,w,-w,w);
-  /* glOrtho(-1.5,1.5,-1.5,1.5,-1.5,1.5); */
-  glMatrixMode(GL_MODELVIEW);
-  glTranslatef(0,0,-2*viewbox);
-  glRotatef(-45,1,0,0);
-  glRotatef(45,0,0,1);
-  glLightfv(GL_LIGHT0, GL_POSITION, light_pos);
-}
-
  
-
-void mycolor(GLfloat* arg) {
-  GLfloat color[4];
-  int i;
-  for(i = 0; i < 3; i++)
-    color[i] = arg[i];
-  color[3] = 1.0;
-  glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, color);
-  glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, color);
-}
-
-void display()
-{
-
-  int i, j,k, ell, jay;
-  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-  drawObjects();
-  glutSwapBuffers();
-}
-
 
 
 
@@ -489,6 +438,62 @@ void specialkeyfunc(int key, int x, int y)
   glutPostRedisplay();
 }
 
+
+
+void myinit()
+{
+  GLfloat mat_specular[] = {0.0, 0.0, 0.0,1.0};
+  GLfloat mat_diffuse[] = {0.0,0.0, 0.0, 1.0}; // though, this'll be changed later
+  GLfloat mat_ambient[] = {0.0, 0.0, 0.0, 1.0};
+  GLfloat mat_shininess= 100.0; // wait, this doesn't matter
+
+  /* glLightfv(GL_LIGHT0, GL_AMBIENT, light_ambient); */
+  /* glLightfv(GL_LIGHT0, GL_DIFFUSE, light_diffuse); */
+  /* glLightfv(GL_LIGHT0, GL_SPECULAR, light_specular); */
+  // default position is vertical, which is okay, for now
+  // default ambient is black
+  // default diffuse and specular are white
+  // good enough
+  GLfloat all_ones[] = {1, 1, 1, 1};
+  GLfloat halves[] = {0.5, 0.5, 0.5,1};
+
+    
+  /* glLightfv(GL_LIGHT0,GL_DIFFUSE,mat_specular); */
+  glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, mat_specular);
+  glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, mat_ambient);
+  glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, mat_diffuse);
+  glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, mat_shininess);
+
+
+  GLfloat light_pos[] = {0.0,0.0,1.0,0.0};
+  /* glLightfv(GL_LIGHT1, GL_POSITION, light_pos); */
+  glLightfv(GL_LIGHT0, GL_DIFFUSE, halves);
+  glLightfv(GL_LIGHT0, GL_SPECULAR, halves);
+  glLightfv(GL_LIGHT1, GL_DIFFUSE, halves);
+  
+  glShadeModel(GL_SMOOTH);
+  glEnable(GL_LIGHTING);
+  glEnable(GL_LIGHT0);
+  glEnable(GL_LIGHT1);
+  
+  glLightModeli(GL_LIGHT_MODEL_TWO_SIDE, GL_TRUE);
+
+  
+  glClearColor(1.0, 1.0, 1.0, 0.0);
+  glColor3f(1.0,0.0,0.0);
+  
+  
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+  float w = viewbox;
+  glOrtho(-w,w,-w,w,-w,w);
+  /* glOrtho(-1.5,1.5,-1.5,1.5,-1.5,1.5); */
+  glMatrixMode(GL_MODELVIEW);
+  glTranslatef(0,0,-2*viewbox);
+  glRotatef(-45,1,0,0);
+  glRotatef(45,0,0,1);
+  glLightfv(GL_LIGHT0, GL_POSITION, light_pos);
+}
 
 
 
