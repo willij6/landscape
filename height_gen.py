@@ -206,12 +206,12 @@ for p in ocean:
 #     # print((" " * depth) + "Handling " + str(p))
 #     drainage_total[p] = 1 # itself
 #     for d in [(1,0),(0,1),(-1,0),(0,-1)]:
-#         nbhr = (d[0]+p[0],d[1]+p[1])
-#         if (nbhr == parents[p] or nbhr not in open_locs
-#             or nbhr in ocean):
+#         nbr = (d[0]+p[0],d[1]+p[1])
+#         if (nbr == parents[p] or nbr not in open_locs
+#             or nbr in ocean):
 #             continue
-#         parents[nbhr] = p
-#         drainage_total[p] += handle(nbhr,depth+1)
+#         parents[nbr] = p
+#         drainage_total[p] += handle(nbr,depth+1)
 #     return drainage_total[p]
 
 # for p in ocean:
@@ -233,19 +233,19 @@ def process_tasks():
 #   onto the tasks list]
 def get_action(p):
     def action():
-        nbhrs = []
+        nbrs = []
         for d in [(1,0),(0,1),(-1,0),(0,-1)]:
-            nbhr = (d[0]+p[0],d[1]+p[1])
-            if(nbhr == parents[p] or nbhr not in open_locs
-               or nbhr in ocean):
+            nbr = (d[0]+p[0],d[1]+p[1])
+            if(nbr == parents[p] or nbr not in open_locs
+               or nbr in ocean):
                 continue
-            nbhrs.append(nbhr)
+            nbrs.append(nbr)
 
         # follow_up takes care of the remaining things
         def follow_up():
-            drainage_total[p] = 1+sum([drainage_total[n] for n in nbhrs])
+            drainage_total[p] = 1+sum([drainage_total[n] for n in nbrs])
         tasks.append(follow_up)                     
-        for n in nbhrs:
+        for n in nbrs:
             parents[n] = p
             tasks.append(get_action(n))
     return action
@@ -298,29 +298,29 @@ while not update_list.empty():
         continue # this instruction was superseded
     for d in [[1,0],[0,1],[-1,0],[0,-1]]:
         (dx,dy) = d
-        nbhr = (loc[0]+dx,loc[1]+dy)
+        nbr = (loc[0]+dx,loc[1]+dy)
         # check for out of bounds
-        if(nbhr[0] < 0 or nbhr[0] > 2*n or nbhr[1] < 0 or nbhr[1] > 2*n):
+        if(nbr[0] < 0 or nbr[0] > 2*n or nbr[1] < 0 or nbr[1] > 2*n):
             continue
         # TODO: encapsulate the algorithm for finding the maximal
         # solution to some constraints, so that it's not mixed
         # up with the actual constraints
-        if(loc not in open_locs and nbhr not in open_locs):
-            flag(nbhr,heights[loc]+max_slope)
+        if(loc not in open_locs and nbr not in open_locs):
+            flag(nbr,heights[loc]+max_slope)
         else:
             # downstream neighbor
-            if(loc in open_locs and parents[loc] == nbhr
+            if(loc in open_locs and parents[loc] == nbr
                or loc not in open_locs):
-                capacity = drainage_total[nbhr]
+                capacity = drainage_total[nbr]
                 capacity = math.log(capacity+1)/math.log((2*n+1)**2+2)
                 capacity = int(capacity*n_slopes)
-                flag(nbhr, heights[loc] - lower_slopes[capacity])
+                flag(nbr, heights[loc] - lower_slopes[capacity])
             else:
-                #upstream nbhr
+                #upstream nbr
                 capacity = drainage_total[loc]
                 capacity = math.log(capacity+1)/math.log((2*n+1)**2+2)
                 capacity = int(capacity*n_slopes)
-                flag(nbhr, heights[loc] + upper_slopes[capacity])
+                flag(nbr, heights[loc] + upper_slopes[capacity])
 
 # STEP 5: output the heights
 
