@@ -1,5 +1,5 @@
 # Huh, let's try and write a makefile
-CC = gcc
+CC = gcc -Wall
 LIBS = -lGL -lGLU -lglut -lm
 SRC = viewer.c
 
