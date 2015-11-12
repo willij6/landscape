@@ -195,7 +195,7 @@ void process_point(int i, int j)
   verts[0] = 2.0*i/N-1;
   verts[1] = 2.0*j/N-1;
   verts[2] = heights[i][j]/2.5-0.5;
-  color[1] = 1.0-drainage_totals[i][j];
+  color[1] = (1.0-drainage_totals[i][j])/1.2;
   color[2] = drainage_totals[i][j];
   color[0] = 0; // (mazeData[i][j])?0:1;
   triangleVertex(verts,color);
