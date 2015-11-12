@@ -16,13 +16,6 @@
   mouse and keyboard controls
 */
 
-// uh, broadly speaking, there should be these concerns:
-// * actually rendering and coloring the stuff
-// * random initialization
-// * resizing
-// * flying around and matrices and all that
-// * file IO
-
 
 
 
@@ -30,194 +23,198 @@
 
 float heights[N][N];
 float drainage_totals[N][N];
+// int mazeData[N][N];
 
 
- 
+// CODE FOR LOADING AND ADJUSTING THE DATA 
 
-void normalize_heights()
+// This linearly rescales the contents of the array
+// so that the lowest value is 0 and the highest is 1
+void normalize(float array[N][N])
 {
+  float min, max;
+  min = max = (**array);
   int i, j;
-  float max_height = 0.0;
+  // first pass: calculate the minimum and maximum
   for(i = 0; i < N; i++) {
     for(j = 0; j < N; j++) {
-      if(heights[i][j] > max_height)
-	max_height = heights[i][j];
+      if(array[i][j] > max)
+	max = array[i][j];
+      if(array[i][j] < min)
+	min = array[i][j];
     }
   }
-  if(max_height == 0.0)
-    max_height == 1.0;
+  // x maps to (x - min)/(max - min) = (x - min)/scale
+  float scale = max - min;
+  if(scale == 0.0)
+    scale = 1;
+  // second pass: adjust everything
   for(i = 0; i < N; i++) {
     for(j = 0; j < N; j++) {
-      heights[i][j] /= max_height;
+      array[i][j] = (array[i][j] - min)/scale;
     }
   }
-
 }
  
-
-float outside_lands(int i, int j)
+// replace every value in the array with
+// the average of its immediate neighborhood
+void smooth(float array[N][N])
 {
-  if(i < 0 || i >= N || j < 0 || j >= N) {
-    return 0;
-  }
-  return heights[i][j];
-}
-
-void smooth()
-{
-  float alts[N][N];
-  int i,j, ii, jj;
-  float t;
-  for(i = 0; i < N; i++) {
-    for(j = 0; j < N; j++) {
-      t = 0;
-      for(ii = -1; ii < 2; ii++) {
-	for(jj = -1; jj < 2; jj++) {
-	  t += outside_lands(i+ii,j+jj);
+  float newArray[N][N]; // temporarily store new values here
+  for(int i = 0; i < N; i++) {
+    for(int j = 0; j < N; j++) {
+      float total = 0; // running total of
+      int count = 0; // size of neighborhood
+      
+      // Iterate over a five-by-five neighborhood
+      for(int ii = i-1; ii < i+2; ii++) {
+	for(int jj = j-1; jj < j+2; jj++) {
+	  if(ii < 0 || ii >= N || jj < 0 || jj >= N)
+	    continue;
+	  total += array[ii][jj];
+	  count++;
 	}
       }
-      t /= 9;
-      alts[i][j] = t;
+      // usually count == 5 now, but this isn't the case
+      // near the edges
+      newArray[i][j] = total/count;
     }
   }
-  for(i = 0; i < N; i++) {
-    for(j = 0; j < N; j++) {
-      heights[i][j] = alts[i][j];
+  // Now copy newArray back into array
+  for(int i = 0; i < N; i++) {
+    for(int j = 0; j < N; j++) {
+      array[i][j] = newArray[i][j];
     }
   }
-  normalize_heights();
+  normalize(array);
 }
 
-void set_heights(char *fname)
+// reads from fname into array
+void readFromFile(float array[N][N], char *fname)
 {
   FILE *pFile;
-  int i, j;
   float t;
   pFile = fopen(fname,"r");
-  for(i = 0; i < N; i++) {
-    for(j = 0; j < N; j++) {
+  for(int i = 0; i < N; i++) {
+    for(int j = 0; j < N; j++) {
+      // read a floatinto array[i][j]
       fscanf(pFile, "%f", &t);
-      heights[i][j] = t;
-      /* printf("I just read %d\n",t); */
+      array[i][j] = t;
+      /* if(t) */
+      /* 	mazeData[i][j] = 1; */
+      /* else */
+      /* 	mazeData[i][j] = 0; */
     }
   }
-  normalize_heights();
   fclose(pFile);
 }
 
 
-void load_drainage_hack()
+// Do all the setup: load the data
+// in from heights.txt (or whatever file the user specified)
+// and drainage.txt
+void loadData(int argc, char **argv)
 {
-  int i, j;
-  set_heights("drainage.txt");
-  smooth();
-  
-  for(i = 0; i < N; i++) {
-    for(j = 0; j < N; j++) {
-      drainage_totals[i][j] = heights[i][j];
-      /* drainage_totals[i][j] = sqrt(drainage_totals[i][j]); */
-    }
-  }
-
+  readFromFile(heights,(argc>1)?argv[1]:"heights.txt");
+  normalize(heights);
+  smooth(heights);
+  readFromFile(drainage_totals,"drainage.txt");
+  normalize(drainage_totals);
+  /* smooth(drainage_totals); */
 }
 
 
+// CODE FOR DRAWING THE TRIANGLES
 
-GLfloat dist(GLfloat* p1, GLfloat* p2)
-{
-  GLfloat dx, dy, dz;
-  dx = p1[0] - p2[0];
-  dy = p1[1] - p2[1];
-  dz = p1[2] - p2[2];
-  return sqrt(dx*dx + dy*dy + dz*dz);
-}
+// First, some utility functions
 
+// dot product of two vectors
+// TODO: this is probably in a library
 GLfloat dot(GLfloat* p1, GLfloat* p2)
 {
   return(p1[0]*p2[0] + p1[1]*p2[1] + p1[2]*p2[2]);
 }
 
-int max(int x, int y)
-{
-  if(x > y) 
-    return x;
-  return y;
-}
- 
 
-void cross(GLfloat* a, GLfloat* b, GLfloat* c, GLfloat* d)
+// calculate a unit vector d normal to the triangle with
+// vertices at a, b, and c
+void calculateNormal(GLfloat* a, GLfloat* b, GLfloat* c, GLfloat* d)
 {
-  GLfloat la;
-  //GLfloat sum[3];
-  int i;
+  // first, set d to the cross product of b-a and c-a
   d[0] = (b[1]-a[1])*(c[2]-a[2])-(b[2]-a[2])*(c[1]-a[1]);
   d[1] = (b[2]-a[2])*(c[0]-a[0])-(b[0]-a[0])*(c[2]-a[2]);
   d[2] = (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
-  //for(i = 0; i < 3; i++) sum[i] = a[i]+b[i]+c[i];
-  la = dot(d,d);
-  la = sqrt(la);
-  // if(dot(d,sum) > 0) la = -la;
-  for(i = 0; i < 3; i++) d[i] /= la;
-  //printf("Sum was (%f,%f,%f)\n",sum[0],sum[1],sum[2]);
-  //printf("Normal was (%f,%f,%f)\n",d[0],d[1],d[2]);
-  
+  // then renormalize it
+  float length = sqrt(dot(d,d));
+  for(int i = 0; i < 3; i++) d[i] /= length;
 }
 
 
-void triangleVertex(GLfloat* pt) {
+// accept a vertex at location pt with color col
+// Every third vertex, draw a triangle
+// (with the correct normal)
+// pt and col are arrays of length 3
+void triangleVertex(GLfloat* pt, GLfloat *col) {
   static GLfloat vertices[3][3];
-  static int stored = 0;
-  int i;
-  GLfloat normal[3];
-  for(i = 0; i < 3; i++)
-    vertices[stored][i] = pt[i];
-  stored++;
-  if(stored < 3)
+  static GLfloat colors[3][4];
+  static int count = 0; // is this the first, second, or third vertex?
+  for(int i = 0; i < 3; i++) {
+    vertices[count][i] = pt[i];
+    colors[count][i] = col[i];
+  }
+  colors[count][3] = 1.0; // alpha
+  // check if this is one of every third vertex
+  if(++count < 3)
     return;
-  cross(vertices[0],vertices[1],vertices[2],normal);
-  glNormal3fv(normal);
-  for(i = 0; i < 3; i++)
+  count = 0;
+
+  // draw a triangle
+  // first calculate the normal
+  GLfloat normal[3];
+  calculateNormal(vertices[0],vertices[1],vertices[2],normal);
+  glNormal3fv(normal); // set it
+  // now tell OpenGL the vertices' locations and colors
+  for(int i = 0; i < 3; i++) {
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, colors[i]);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, colors[i]);
     glVertex3fv(vertices[i]);
-  stored = 0;
+  }
+
 }
 
-void mycolor(GLfloat* arg) {
-  GLfloat color[4];
-  int i;
-  for(i = 0; i < 3; i++)
-    color[i] = arg[i];
-  color[3] = 1.0;
-  glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, color);
-  glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, color);
-}
-
-
-
+// process the point at i, j:
+// calculate the correct location and color, and send
+// them to triangleVertex()
+//
+// Like triangleVertex and glVertex3fv, this needs to
+// be called in meaningful sets of three.
 void process_point(int i, int j)
 {
   GLfloat verts[3];
   GLfloat color[3];
   verts[0] = 2.0*i/N-1;
   verts[1] = 2.0*j/N-1;
-  verts[2] = heights[i][j]/1.5-0.5;
+  verts[2] = heights[i][j]/2.5-0.5;
   color[1] = 1.0-drainage_totals[i][j];
   color[2] = drainage_totals[i][j];
-  color[0] = 0;
-  mycolor(color);
-  triangleVertex(verts);
+  color[0] = 0; // (mazeData[i][j])?0:1;
+  triangleVertex(verts,color);
 }
 
 
 
-void drawObjects()
+// the main function that renders everything
+void display()
 {
-  int i, j;
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   glBegin(GL_TRIANGLES);
-  for(j = 0; j < N-1; j++) {
-    for(i = 0; i < N-1; i++) {
+  for(int j = 0; j < N-1; j++) {
+    for(int i = 0; i < N-1; i++) {
+      // first triangle
       process_point(i,j);
       process_point(i+1,j);
       process_point(i,j+1);
+      // second triangle
       process_point(i+1,j+1);
       process_point(i+1,j);
       process_point(i,j+1);
@@ -230,28 +227,35 @@ void drawObjects()
 
 
 
-void display()
+
+// CHANGING THE VIEW, FLYING AROUND
+
+
+
+#define VIEWBOX 1.42
+
+
+
+// angle of inclination, sort of
+float varphi;
+// TODO: what was I thinking here?
+
+
+  
+void initialView()
 {
-
-  int i, j,k, ell, jay;
-  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-  drawObjects();
-  glutSwapBuffers();
+  varphi = 45;
+  
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+  float w = VIEWBOX;
+  glOrtho(-w,w,-w,w,-w,w);
+  /* glOrtho(-1.5,1.5,-1.5,1.5,-1.5,1.5); */
+  glMatrixMode(GL_MODELVIEW);
+  glTranslatef(0,0,-2*VIEWBOX);
+  glRotatef(-45,1,0,0); // TODO: is this varphi?
+  glRotatef(45,0,0,1); // TODO: is this varphi?
 }
-
-
-
-
-
-
-
-
-
-float viewbox = 1.42;
-
-
-float varphi = 45;
 
 
 void rescale(GLfloat factor)
@@ -259,9 +263,9 @@ void rescale(GLfloat factor)
   GLfloat m[16];
   glGetFloatv(GL_MODELVIEW_MATRIX,m);
   glLoadIdentity();
-  glTranslatef(0,0,-2*viewbox);
+  glTranslatef(0,0,-2*VIEWBOX);
   glScalef(factor,factor,factor);
-  glTranslatef(0,0,2*viewbox);
+  glTranslatef(0,0,2*VIEWBOX);
   glMultMatrixf(m);
 }
 
@@ -317,10 +321,10 @@ void myreshape(int width, int height)
   glMatrixMode(GL_PROJECTION);
   glLoadIdentity();
   if(width < height) {
-    glFrustum(-0.1*viewbox,0.1*viewbox,-0.1*viewbox*height/width,0.1*viewbox*height/width, viewbox/10,10*viewbox);
+    glFrustum(-0.1*VIEWBOX,0.1*VIEWBOX,-0.1*VIEWBOX*height/width,0.1*VIEWBOX*height/width, VIEWBOX/10,10*VIEWBOX);
 }
   else {
-    glFrustum(-0.1*viewbox*width/height,0.1*viewbox*width/height,-0.1*viewbox,0.1*viewbox,viewbox/10,10*viewbox);
+    glFrustum(-0.1*VIEWBOX*width/height,0.1*VIEWBOX*width/height,-0.1*VIEWBOX,0.1*VIEWBOX,VIEWBOX/10,10*VIEWBOX);
   }
 
 
@@ -370,7 +374,6 @@ void mymouse(int button, int state, int x, int y)
 
 void mymove(int x, int y)
 {
-  GLfloat m[16];
   if(tracking == 1)
   {
     int dx = x - oldx;
@@ -398,11 +401,8 @@ void mymove(int x, int y)
 void keyfunc(unsigned char key, int x, int y)
 {
   if(key == ' ') {
-      smooth();
+      smooth(heights);
   }
-  /* else if(key == '4') { */
-  /*     levelOut(); */
-  /* } */
   else if(key == 'w') {
     translate(0.07,0,0);
   }
@@ -454,7 +454,7 @@ void myinit()
   // default ambient is black
   // default diffuse and specular are white
   // good enough
-  GLfloat all_ones[] = {1, 1, 1, 1};
+  /* GLfloat all_ones[] = {1, 1, 1, 1}; */
   GLfloat halves[] = {0.5, 0.5, 0.5,1};
 
     
@@ -481,17 +481,8 @@ void myinit()
   
   glClearColor(1.0, 1.0, 1.0, 0.0);
   glColor3f(1.0,0.0,0.0);
-  
-  
-  glMatrixMode(GL_PROJECTION);
-  glLoadIdentity();
-  float w = viewbox;
-  glOrtho(-w,w,-w,w,-w,w);
-  /* glOrtho(-1.5,1.5,-1.5,1.5,-1.5,1.5); */
-  glMatrixMode(GL_MODELVIEW);
-  glTranslatef(0,0,-2*viewbox);
-  glRotatef(-45,1,0,0);
-  glRotatef(45,0,0,1);
+
+  initialView();
   glLightfv(GL_LIGHT0, GL_POSITION, light_pos);
 }
 
@@ -499,15 +490,13 @@ void myinit()
 
 int main(int argc, char **argv)
 {
-  load_drainage_hack();
-  set_heights((argc>1)?argv[1]:"heights.txt");
+  loadData(argc,argv);
   glutInit(&argc, argv);
   glutInitDisplayMode(GLUT_DOUBLE |  GLUT_RGB | GLUT_DEPTH);
   glutInitWindowSize(700,700);
   glutInitWindowPosition(0,0);
   glutCreateWindow("Virtual Landscape");
   glutDisplayFunc(display);
-  /* glutIdleFunc(spinme); */
   glutMotionFunc(mymove);
   glutReshapeFunc(myreshape);
   glutMouseFunc(mymouse);
