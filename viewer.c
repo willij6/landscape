@@ -17,13 +17,24 @@
 */
 
 
+/*
+  The main concerns:
+  * Loading and adjusting the data
+  * Drawing the map
+  * Navigating, changing the view
+  * Responding to event callbacks
+  * Setting up the projection matrix correctly
+  * Initializing everything
+  The code is divided up accordingly.
+*/
 
 
 #define N 129
+#define SHOW_MAZE 0
 
 float heights[N][N];
 float drainage_totals[N][N];
-// int mazeData[N][N];
+int mazeData[N][N];
 
 
 // CODE FOR LOADING AND ADJUSTING THE DATA 
@@ -100,10 +111,10 @@ void readFromFile(float array[N][N], char *fname)
       // read a floatinto array[i][j]
       fscanf(pFile, "%f", &t);
       array[i][j] = t;
-      /* if(t) */
-      /* 	mazeData[i][j] = 1; */
-      /* else */
-      /* 	mazeData[i][j] = 0; */
+      if(t)
+      	mazeData[i][j] = 1;
+      else
+      	mazeData[i][j] = 0;
     }
   }
   fclose(pFile);
@@ -116,10 +127,11 @@ void readFromFile(float array[N][N], char *fname)
 void loadData(int argc, char **argv)
 {
   readFromFile(heights,(argc>1)?argv[1]:"heights.txt");
-  normalize(heights);
-  smooth(heights);
+  normalize(heights); // redundant, if we're going to smooth
+  smooth(heights); // also normalizes
   readFromFile(drainage_totals,"drainage.txt");
-  normalize(drainage_totals);
+  normalize(drainage_totals); // redundant, if we're going to smooth
+  smooth(drainage_totals); // also normalizes
   /* smooth(drainage_totals); */
 }
 
@@ -192,12 +204,17 @@ void process_point(int i, int j)
 {
   GLfloat verts[3];
   GLfloat color[3];
+  // convert integer values in range 0...N
+  // to floats between -1 and 1
   verts[0] = 2.0*i/N-1;
   verts[1] = 2.0*j/N-1;
-  verts[2] = heights[i][j]/2.5-0.5;
+  verts[2] = heights[i][j]/2.5;
   color[1] = (1.0-drainage_totals[i][j])/1.2;
   color[2] = drainage_totals[i][j];
-  color[0] = 0; // (mazeData[i][j])?0:1;
+  if(SHOW_MAZE)
+    color[0] = (mazeData[i][j])?0:1;
+  else
+    color[0] = 0;
   triangleVertex(verts,color);
 }
 
@@ -206,6 +223,17 @@ void process_point(int i, int j)
 // the main function that renders everything
 void display()
 {
+  // step 1: set up the lights
+  // (we do this here, not in myinit,
+  //  because the lights move with the model)
+  GLfloat top_left[] = {-1,1,1,0};
+          // Why top left?
+          // https://en.wikipedia.org/wiki/Terrain_cartography#Shaded_relief
+  GLfloat overhead[] = {0,0,1,0};
+  glLightfv(GL_LIGHT0, GL_POSITION, top_left);
+  glLightfv(GL_LIGHT1, GL_POSITION, overhead);
+
+  // step 2: draw the map
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   glBegin(GL_TRIANGLES);
   for(int j = 0; j < N-1; j++) {
@@ -230,119 +258,283 @@ void display()
 
 // CHANGING THE VIEW, FLYING AROUND
 
+// Goal: a system that allows the user to move in 3 dimensions,
+// and rotate the view, except that up must always be up
+// (one degree of freedom is missing)
 
 
-#define VIEWBOX 1.42
+
+// In model coordinates longitutde, latitude, height are x, y, z.
+// The projection matrix roughly converts x and y to screen coordinates,
+// so if the view matrix is trivial, we get an overhead view looking down
+
+
+// The general view matrix will look like
+// R_phi * M * T
+// Where
+//     T is a translation, moving the eye position to the origin
+//     M is a combination of rotation by theta around z and scaling
+//         (note that scaling and rotation commuting)
+//     R_phi is a rotation by angle phi around the x axis
 
 
 
-// angle of inclination, sort of
-float varphi;
-// TODO: what was I thinking here?
+// The user can trigger the following motions:
+// - rotate: change theta and phi (but maintains up as up)
+// - translate: postmult by a translation
+//     NB: translation is relative to how we're turned!
+// - rescale the view: postmult by a rescaling
+//     Actually a rescaling around a point in front of the viewer
+//     Again, this is relative to how we're turned, so we get
+//     Away with postmultiplication
 
 
-  
-void initialView()
+// Claim: these transformations preserve the form R_phi*M*T,
+//        and the latter two don't change phi:
+// Proof:
+// If Z is a combination of rescaling and translation (a homothety)
+// then Z*R_phi*M*T = R_phi*M*Z'*T for some homothety Z'
+// because homotheties are a normal subgroup.
+//
+// And then Z' = A*T' for some scaling A and some translation T',
+// so Z*R_phi*M*T = R_phi*M*Z'*T = R_phi*(M*A)*(T'*T)
+
+
+
+// Frequently, we need to postmultiply by something
+// Since OpenGL only knows about premultiplication (mult on the right),
+// we have to instead...
+// - save the ModelView Matrix in a variable m
+// - load whatever matrix we want to change the ModelView by
+// - right multiply by m
+
+
+
+// To enact the rotation one, we need to change phi and theta.
+// The best way to change theta is to strip off R_phi, post multiply
+// by a rotation by dtheta, and then put R_phi back.
+
+// To do this, we need to store phi:
+// R_phi is glRotatef(-phi,1,0,0)
+// phi is basically the inclination, or some proxy for it
+float phi;
+
+
+
+
+
+
+
+// When the user zooms in and out,
+// we should zoom around a specific point
+// Ideally, this would be the point behind the
+// mouse, but since selection isn't working TODO
+// instead use as a proxy the point
+//  (0,0,-focus)
+GLfloat focus = 1.1;
+// Also, to start, the center of the map should be there
+
+// called at the start
+void initialModelView()
 {
-  varphi = 45;
-  
-  glMatrixMode(GL_PROJECTION);
-  glLoadIdentity();
-  float w = VIEWBOX;
-  glOrtho(-w,w,-w,w,-w,w);
-  /* glOrtho(-1.5,1.5,-1.5,1.5,-1.5,1.5); */
-  glMatrixMode(GL_MODELVIEW);
-  glTranslatef(0,0,-2*VIEWBOX);
-  glRotatef(-45,1,0,0); // TODO: is this varphi?
-  glRotatef(45,0,0,1); // TODO: is this varphi?
+  phi = 45; // start with some inclination
+
+  glTranslatef(0,0,-focus); // multiply on left by some conjugate of
+				// desired T
+  glRotatef(-phi,1,0,0); // R_phi
+  glRotatef(45,0,0,1); // M
+
 }
 
-
+// called when the user rescales the view
+// factor is the ratio of how much stuff should be scaled by
 void rescale(GLfloat factor)
 {
-  GLfloat m[16];
-  glGetFloatv(GL_MODELVIEW_MATRIX,m);
+  // postmultiply by a rescaling,
+  // or rather a rescaling around a point in front
+  // of the viewer, which we get by conjugating
+  // the rescaling by translation.
+
+  // Also, OpenGL only knows about premultiplication,
+  GLfloat oldMV[16];
+  glGetFloatv(GL_MODELVIEW_MATRIX,oldMV); // save the Model-View matrix
+  // load the matrix which we want to multiply Model-View BY...
   glLoadIdentity();
-  glTranslatef(0,0,-2*VIEWBOX);
-  glScalef(factor,factor,factor);
-  glTranslatef(0,0,2*VIEWBOX);
-  glMultMatrixf(m);
+  glTranslatef(0,0,-focus);
+  glScalef(factor,factor,factor); // the actual rescaling
+  glTranslatef(0,0,focus);
+  // multiply on the RIGHT by the original model view matrix
+  glMultMatrixf(oldMV);
 }
 
+// translate the view, relative to the current orientation
 void translate(GLfloat forward, GLfloat right, GLfloat up)
 {
-  GLfloat m[16];
-  glGetFloatv(GL_MODELVIEW_MATRIX,m);
+  // new modelview = translation * (old modelview)
+  GLfloat oldMV[16];
+  // store old model view
+  glGetFloatv(GL_MODELVIEW_MATRIX,oldMV);
+  // load the translation
   glLoadIdentity();
   glTranslatef(right,up,forward);
-  glMultMatrixf(m);
+  // multiply on the RIGHT by the old model view
+  glMultMatrixf(oldMV);
 }
 
+// rotate the view, maintaining up as up
 void rotate(GLfloat up, GLfloat right) {
-  GLfloat m[16];
-  glGetFloatv(GL_MODELVIEW_MATRIX,m);
+  // new model view = R_(new phi) * R_(d theta) * R_(- old phi) * (old model view)
+  GLfloat oldMV[16];
+  // save the old model view
+  glGetFloatv(GL_MODELVIEW_MATRIX,oldMV);
+  // load the three rotations
   glLoadIdentity();
-  float newvarphi = varphi + up;
-  glRotatef(-newvarphi,1,0,0);
-  glRotatef(-right,0,0,1);
-  glRotatef(varphi,1,0,0);
-  glMultMatrixf(m);
-  varphi = newvarphi;
+  float oldphi = phi;
+  phi += up;
+	  // OpenGL always mult's on the right,
+	  // so they're in reverse order
+	  glRotatef(-phi,1,0,0);
+	  glRotatef(-right,0,0,1);
+	  glRotatef(oldphi,1,0,0);
+  // RIGHT multiply by the original model view
+  glMultMatrixf(oldMV);
+
 }
 
+// set phi to 90, so the user is looking horizontally
 void levelOut() {
-  GLfloat m[16];
-  glGetFloatv(GL_MODELVIEW_MATRIX,m);
+  // new model view = R_(new phi) * R_(- old phi) * (old model view)
+  // save the old model-view matrix
+  GLfloat oldMV[16];
+  glGetFloatv(GL_MODELVIEW_MATRIX,oldMV);
+  // load the new ones
+  float oldphi = phi;
+  phi = 90;
   glLoadIdentity();
-  glRotatef(-90,1,0,0);
-  glRotatef(varphi,1,0,0);
-  glMultMatrixf(m);
-  varphi = 90;
+  glRotatef(-phi,1,0,0);
+  glRotatef(oldphi,1,0,0);
+  glMultMatrixf(oldMV);
 }
 
 
 
 
+// CALLBACKS FOR FLYING AROUND
+// What follows is a list of functions that are directly registered
+// with GLUT as callbacks to call when the user
+// * Clicks and drags (mymouse and mymove)
+// * Presses certain keys (keyfunc and specialkeyfunc)
+
+// These actions are translated into calls to
+// the rescale, rotate, translate, and levelOut functions above
+
+// Also, the SPACE bar causes the heights to be rescaled.
+
+// The current controls can be read off from the functions below.
+// They're not so great, and will be changed in the future.
 
 
 
- 
-
-
-
-
-
-void myreshape(int width, int height)
+// called for "ordinary" keys, like letters
+void keyfunc(unsigned char key, int x, int y)
 {
-  int w, h;
-  w = width;
-  h = height;
-  glViewport(0,0,w,h);
-  glMatrixMode(GL_PROJECTION);
-  glLoadIdentity();
-  if(width < height) {
-    glFrustum(-0.1*VIEWBOX,0.1*VIEWBOX,-0.1*VIEWBOX*height/width,0.1*VIEWBOX*height/width, VIEWBOX/10,10*VIEWBOX);
-}
-  else {
-    glFrustum(-0.1*VIEWBOX*width/height,0.1*VIEWBOX*width/height,-0.1*VIEWBOX,0.1*VIEWBOX,VIEWBOX/10,10*VIEWBOX);
+  if(key == ' ') {
+    // this changes all the heights to be a bit smoother
+    smooth(heights);
   }
+  else if(key == 'w') {
+    translate(0.07,0,0); // move forward
+  }
+  else if(key == 's') {
+    translate(-0.07,0,0); // move backwards
+  }
+  else if(key == 'a') {
+    rotate(0,5); // turn left
+  }
+  else if(key == 'd') {
+    rotate(0,-5); // turn right
+  }
+  glutPostRedisplay();
+}
 
-
-  glMatrixMode(GL_MODELVIEW);
+// called for special keys like arrows and home
+void specialkeyfunc(int key, int x, int y)
+{
+  if(key == GLUT_KEY_UP) {
+    translate(0,0,-0.07); // translate upwards
+  }
+  else if(key == GLUT_KEY_DOWN) {
+    translate(0,0,0.07); // translate downwards
+  }
+  else if(key == GLUT_KEY_LEFT) {
+    translate(0,0.07,0); // translate left
+  }
+  else if(key == GLUT_KEY_RIGHT) {
+    translate(0,-0.07,0); // translate right
+  }
+  else if(key == GLUT_KEY_HOME) {
+    levelOut();
+  }
   glutPostRedisplay();
 }
 
 
+// Mouse Callbacks
 
-int oldx, oldy;
-int tracking = 0;
+// the mouse callbacks are more confusing,
+// since we want to respond to mouse motions,
+// not to clicks in specific locations
+//
+// Also, we need to remember which button is
+// pressed, the left or right one...
+
+
+
+int oldx, oldy; // most recent mouse location
+int mode = 0; // 1 = left-drag, -1 = right-drag,
+	      // 0 = not dragging at all
+
+
+
+
+// left-dragging translates left/right/forward/backwards
+// (but not up or down)
+// right-dragging rotates
+
+// Additionally, there's the mouse wheel, which triggers
+// rescaling.  OpenGL things of scrolling as pushing
+// buttons 3 and 4 on the mouse
+
+
+// Callback called when the mouse is moved
+// with at least one button pressed
+void mymove(int x, int y)
+{
+  // compare new location to old location
+  // and record the new location
+  int dx = x - oldx;
+  int dy = y - oldy;
+  oldx = x;
+  oldy = y;
+
+  if(mode == 1)
+    rotate(dy*0.3,dx*0.3);
+  else if(mode == -1)
+    translate(dy*0.01,dx*0.01,0);
+  glutPostRedisplay();
+}
+
 
  
- 
+// Callback for pressing or releasing mouse buttons,
+// or mouse-scrolling
 void mymouse(int button, int state, int x, int y)
 {
+  if(state == GLUT_UP)
+    mode = 0; // end tracking
   if(state == GLUT_DOWN)
   {
+    // first, check for mouse wheel!
     if(button == 3) {
       rescale(1.1);
       glutPostRedisplay();
@@ -353,159 +545,142 @@ void mymouse(int button, int state, int x, int y)
       glutPostRedisplay();
       return;
     }
+    // otherwise, set up tracking
     oldx = x;
     oldy = y;
     if(button == GLUT_LEFT_BUTTON)
-      tracking = 1;
-    else
-      tracking = -1;
-    // printf("tracking");
-  }
-  if(state == GLUT_UP)
-  {
-    tracking = 0;
-    // printf("not tracking");
+      mode = 1;
+    else // hopefully, button == GLUT_RIGHT_BUTTON
+      mode = -1;
   }
 }
+
+
+
+// THE PROJECTION MATRIX AND RESIZING
+
+
+
+
+// The projection matrix is set in the following
+// function, which is called when the event loop
+// begins (why?) and also when the window resizes
+void myreshape(int width, int height)
+{
+  // The projection matrix is a perspective view,
+  // with the eye at the origin
+
+  // adjust the viewport, otherwise rescaling won't work
+  glViewport(0,0,width,height);
+
+
+  // Calculate values for the call to glFrustum()
+  
+  // distance to front clipping pane
+  GLdouble front = 0.03;
+  // distance to rear clipping pane
+  GLdouble back = 30;
+  // slope of the sides of the frustum
+  // (high values look unnatural)
+  GLdouble slope = 0.7;
+  GLdouble left = -slope*front;
+  GLdouble right = slope*front;
+  GLdouble bottom = -slope*front;
+  GLdouble top = slope*front;
+  if(width < height) {
+    bottom = bottom*height/width;
+    top = top*height/width;
+  }
+  else {
+    left = left*width/height;
+    right = right*width/height;
+  }
+
+  // set the projection matrix using glFrustum
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+  glFrustum(left,right,bottom,top,front,back);
+  glMatrixMode(GL_MODELVIEW);
+  
+  glutPostRedisplay();
+}
+
+
+
+// INITIALIZATION
 
   
-
-      
-
-void mymove(int x, int y)
+void gl_init()
 {
-  if(tracking == 1)
-  {
-    int dx = x - oldx;
-    int dy = y - oldy;
-    oldx = x;
-    oldy = y;
-    /* rotate(0,0); */
-    rotate(dy*0.3,dx*0.3);
-  }
-  else if(tracking == -1)
-  {
-    int dx = x - oldx;
-    int dy = y - oldy;
-    oldx = x;
-    oldy = y;
-    translate(dy*0.03,dx*0.03,0);
-  }
-  GLfloat light_pos[] = {0.0,0.0,1.0,0.0};
-  glLightfv(GL_LIGHT0, GL_POSITION, light_pos);
-  glutPostRedisplay();
-      
-}
-
-
-void keyfunc(unsigned char key, int x, int y)
-{
-  if(key == ' ') {
-      smooth(heights);
-  }
-  else if(key == 'w') {
-    translate(0.07,0,0);
-  }
-  else if(key == 's') {
-    translate(-0.07,0,0);
-  }
-  else if(key == 'a') {
-    rotate(0,5);
-  }
-  else if(key == 'd') {
-    rotate(0,-5);
-  }
-  glutPostRedisplay();
-}
-
-void specialkeyfunc(int key, int x, int y)
-{
-  if(key == GLUT_KEY_UP) {
-    translate(0,0,-0.07);
-  }
-  else if(key == GLUT_KEY_DOWN) {
-    translate(0,0,0.07);
-  }
-  else if(key == GLUT_KEY_LEFT) {
-    translate(0,0.07,0);
-  }
-  else if(key == GLUT_KEY_RIGHT) {
-    translate(0,-0.07,0);
-  }
-  else if(key == GLUT_KEY_HOME) {
-    levelOut();
-  }
-  glutPostRedisplay();
-}
-
-
-
-void myinit()
-{
-  GLfloat mat_specular[] = {0.0, 0.0, 0.0,1.0};
-  GLfloat mat_diffuse[] = {0.0,0.0, 0.0, 1.0}; // though, this'll be changed later
-  GLfloat mat_ambient[] = {0.0, 0.0, 0.0, 1.0};
-  GLfloat mat_shininess= 100.0; // wait, this doesn't matter
-
-  /* glLightfv(GL_LIGHT0, GL_AMBIENT, light_ambient); */
-  /* glLightfv(GL_LIGHT0, GL_DIFFUSE, light_diffuse); */
-  /* glLightfv(GL_LIGHT0, GL_SPECULAR, light_specular); */
-  // default position is vertical, which is okay, for now
-  // default ambient is black
-  // default diffuse and specular are white
-  // good enough
-  /* GLfloat all_ones[] = {1, 1, 1, 1}; */
-  GLfloat halves[] = {0.5, 0.5, 0.5,1};
-
-    
-  /* glLightfv(GL_LIGHT0,GL_DIFFUSE,mat_specular); */
-  glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, mat_specular);
-  glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, mat_ambient);
-  glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, mat_diffuse);
-  glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, mat_shininess);
-
-
-  GLfloat light_pos[] = {0.0,0.0,1.0,0.0};
-  /* glLightfv(GL_LIGHT1, GL_POSITION, light_pos); */
-  glLightfv(GL_LIGHT0, GL_DIFFUSE, halves);
-  glLightfv(GL_LIGHT0, GL_SPECULAR, halves);
-  glLightfv(GL_LIGHT1, GL_DIFFUSE, halves);
+  // set up various flags
+  glShadeModel(GL_SMOOTH); // smooth shading
+  glLightModeli(GL_LIGHT_MODEL_TWO_SIDE, GL_TRUE); // two-sided lighting
+  glEnable(GL_DEPTH_TEST); // need this for z-buffer depth to work
+  glEnable(GL_NORMALIZE); // otherwise, the normals aren't normalized and
+			  // shading acts screwy when you zoom in and out
+  glEnable(GL_LIGHTING); // yes, we would like to use lighting
   
-  glShadeModel(GL_SMOOTH);
-  glEnable(GL_LIGHTING);
+  // we'll use two lights: light0 and light1
+  // light0 is the top left lighting one,
+  // while light1 is directly above the model
+  // See the start of display()
   glEnable(GL_LIGHT0);
   glEnable(GL_LIGHT1);
-  
-  glLightModeli(GL_LIGHT_MODEL_TWO_SIDE, GL_TRUE);
+  GLfloat diffuse[] = {0.4,0.4,0.4,1};
+  GLfloat specular[] = {0.1,0.1,0.1,1};
+  glLightfv(GL_LIGHT0, GL_DIFFUSE,diffuse);
+  glLightfv(GL_LIGHT0, GL_SPECULAR,specular);
+  glLightfv(GL_LIGHT1, GL_DIFFUSE,diffuse);
+  glLightfv(GL_LIGHT1, GL_SPECULAR,specular);
+  // the locations of the lights are set when
+  // display() is called
 
-  
+  // set up default material
+  glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 3);
+  // most of the material parameters are set up
+  // when display() is called, specifically within triangleVertex()
+
+  // the background color--the color of the sky
   glClearColor(1.0, 1.0, 1.0, 0.0);
-  glColor3f(1.0,0.0,0.0);
 
-  initialView();
-  glLightfv(GL_LIGHT0, GL_POSITION, light_pos);
+  // the Matrices  
+  // initialProjection() ; // taken care of by the reshape callback
+  initialModelView();
+
+  
 }
 
+// set up all the GLUT-related stuff
+void glut_init(int argc, char **argv)
+{
+  glutInit(&argc, argv);
+  // use double buffering
+  // do z-buffer depth tests
+  // use RGB (rather than color index) <- this is on by default
+  glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
+  // set up the window
+  glutInitWindowSize(700,700);
+  glutInitWindowPosition(0,0);
+  glutCreateWindow("Virtual Landscape");
+  // register the callbacks
+  glutDisplayFunc(display);
+  glutMotionFunc(mymove);
+  glutReshapeFunc(myreshape); // window resized
+  glutMouseFunc(mymouse);
+  glutKeyboardFunc(keyfunc); // normal keyboard keys
+  glutSpecialFunc(specialkeyfunc); // special keyboard keys
+}
 
 
 int main(int argc, char **argv)
 {
+  // load the elevation and color data
   loadData(argc,argv);
-  glutInit(&argc, argv);
-  glutInitDisplayMode(GLUT_DOUBLE |  GLUT_RGB | GLUT_DEPTH);
-  glutInitWindowSize(700,700);
-  glutInitWindowPosition(0,0);
-  glutCreateWindow("Virtual Landscape");
-  glutDisplayFunc(display);
-  glutMotionFunc(mymove);
-  glutReshapeFunc(myreshape);
-  glutMouseFunc(mymouse);
-  glutKeyboardFunc(keyfunc);
-  glutSpecialFunc(specialkeyfunc);
-  myinit();
-  glEnable(GL_DEPTH_TEST);
-  glEnable(GL_NORMALIZE);
-  glutPostRedisplay();
+  // initialize GLUT
+  glut_init(argc,argv);
+  // initialize GL
+  gl_init();
+  glutPostRedisplay(); // TODO: is leaving this out a bad idea?
   glutMainLoop();
   return 0;
 }
